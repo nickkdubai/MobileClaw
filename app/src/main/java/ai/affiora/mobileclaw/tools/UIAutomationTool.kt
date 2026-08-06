@@ -107,7 +107,9 @@ class UIAutomationTool(
                 if (service.typeText(text)) {
                     ToolResult.Success("Typed: \"$text\"")
                 } else {
-                    ToolResult.Error("Failed to type text. No focused editable field found.")
+                    ToolResult.Error(
+                        "Failed to type text: the focused field did not contain the requested value."
+                    )
                 }
             }
             "scroll" -> {
