@@ -2,7 +2,11 @@ package ai.affiora.mobileclaw.tools
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -155,14 +159,67 @@ class ClawAccessibilityService : AccessibilityService() {
         return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
 
-    /** Type text into the currently focused editable field. */
+    /**
+     * Type text into the currently focused editable field and verify that the
+     * target actually accepted it. Some WebView inputs report ACTION_SET_TEXT
+     * as successful without changing their DOM value, so the action result by
+     * itself is not evidence that typing succeeded.
+     */
     fun typeText(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
         val focused = findFocusedEditable(root) ?: return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        if (focusedTextEquals(text)) return true
+
+        // WebView fallback: a real paste is handled through the input method
+        // path and triggers the page's normal input/change event machinery.
+        return pasteAndVerify(text)
+    }
+
+    private fun pasteAndVerify(text: String): Boolean {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return false
+        val previousClip = clipboard.primaryClip
+
+        return try {
+            clipboard.setPrimaryClip(ClipData.newPlainText("MobileClaw input", text))
+            val focused = rootInActiveWindow?.let(::findFocusedEditable) ?: return false
+            focused.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+
+            // Replace any value that may have been partially accepted before
+            // using ACTION_PASTE, rather than appending to it.
+            val selectionArgs = Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                putInt(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
+                    focused.text?.length ?: 0,
+                )
+            }
+            focused.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectionArgs)
+            focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            focusedTextEquals(text)
+        } finally {
+            if (previousClip != null) {
+                clipboard.setPrimaryClip(previousClip)
+            } else {
+                clipboard.clearPrimaryClip()
+            }
+        }
+    }
+
+    private fun focusedTextEquals(expected: String): Boolean {
+        repeat(3) {
+            SystemClock.sleep(50)
+            val actual = rootInActiveWindow
+                ?.let(::findFocusedEditable)
+                ?.text
+                ?.toString()
+            if (actual == expected) return true
+        }
+        return false
     }
 
     private fun findFocusedEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
