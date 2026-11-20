@@ -1,0 +1,47 @@
+name: Modern Web Guidance audit (ACE Gallery)
+on:
+  push:
+    branches:
+      - 'audit/modern-web-guidance-gallery-20261121'
+permissions:
+  contents: read
+jobs:
+  scan:
+    name: Official modern-web-guidance legacy-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Read-only checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+          gallery
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run official Google scanner
+        shell: bash
+        run: |
+          set +e
+          echo "Audit: ACE Gallery"
+          echo "Version:"
+          npx -y modern-web-guidance@latest --version
+          mkdir -p /tmp/ace-gallery
+          cat gallery/part_*.txt > /tmp/ace-gallery/index.html
+          echo "Gallery HTML bytes: $(wc -c < /tmp/ace-gallery/index.html)"
+          echo "::group::MWG_SCAN_TARGET /tmp/ace-gallery"
+          npx -y modern-web-guidance@latest legacy-scan "/tmp/ace-gallery" --json > "$RUNNER_TEMP/scan_0.json" 2>&1
+          code=$?
+          echo "MWG_EXIT /tmp/ace-gallery: $code"
+          head -c 22000 "$RUNNER_TEMP/scan_0.json"
+          echo
+          echo "::endgroup::"
+      - name: Save full JSON reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mwg-modern-web-guidance-gallery-20261121
+          path: ${{ runner.temp }}/scan_*.json
+          if-no-files-found: warn
